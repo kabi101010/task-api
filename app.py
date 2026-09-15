@@ -1,5 +1,7 @@
 from flask import Flask, jsonify, request
-from datetime import datetime, timezone
+from datetime import datetime
+from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_LATEST
+import time
 
 app = Flask(__name__)
 
@@ -7,10 +9,39 @@ app = Flask(__name__)
 tasks = []
 next_id = 1
 
+# --- Prometheus metrics ---
+REQUEST_COUNT = Counter(
+    "task_api_requests_total", "Total number of requests", ["method", "endpoint", "status"]
+)
+REQUEST_LATENCY = Histogram(
+    "task_api_request_latency_seconds", "Request latency in seconds", ["endpoint"]
+)
+
+
+@app.before_request
+def start_timer():
+    request.start_time = time.time()
+
+
+@app.after_request
+def record_metrics(response):
+    latency = time.time() - request.start_time
+    REQUEST_LATENCY.labels(endpoint=request.path).observe(latency)
+    REQUEST_COUNT.labels(
+        method=request.method, endpoint=request.path, status=response.status_code
+    ).inc()
+    return response
+
+
+@app.route("/metrics", methods=["GET"])
+def metrics():
+    """Prometheus scrapes this endpoint to collect metrics."""
+    return generate_latest(), 200, {"Content-Type": CONTENT_TYPE_LATEST}
+
 
 @app.route("/health", methods=["GET"])
 def health():
-    """Used later by Kubernetes to check if the app is alive."""
+    """Used by Kubernetes to check if the app is alive."""
     return jsonify({"status": "ok"}), 200
 
 
@@ -31,7 +62,7 @@ def create_task():
         "id": next_id,
         "title": data["title"],
         "done": False,
-        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_at": datetime.utcnow().isoformat(),
     }
     tasks.append(task)
     next_id += 1

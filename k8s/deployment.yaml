@@ -16,7 +16,7 @@ spec:
     spec:
       containers:
         - name: task-api
-          image: task-api:latest
+          image: task-api:v2
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 5000
